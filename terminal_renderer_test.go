@@ -1336,3 +1336,37 @@ func (l *testLogger) Printf(format string, args ...interface{}) {
 	l.buf.WriteString(format)
 	l.buf.WriteByte('\n')
 }
+
+// A link that continues onto the next line must be reopened there: the
+// renderer closes it at the end of each line, so a row that starts inside the
+// same link has to set it again or its cells are drawn unlinked.
+func TestRendererReopensLinkOnNextLine(t *testing.T) {
+	const w, h = 10, 2
+	var buf bytes.Buffer
+	r := NewTerminalRenderer(&buf, []string{"TERM=xterm-256color", "COLORTERM=truecolor"})
+	r.SetColorProfile(colorprofile.TrueColor)
+	r.Resize(w, h)
+
+	const url = "https://example.com"
+	scr := NewScreenBuffer(w, h)
+	for y := range h {
+		for x := range w {
+			scr.SetCell(x, y, &Cell{Content: "x", Width: 1, Link: Link{URL: url}})
+		}
+	}
+	r.Render(scr.RenderBuffer)
+	if err := r.Flush(); err != nil {
+		t.Fatal(err)
+	}
+
+	lines := strings.Split(buf.String(), "\r\n")
+	if len(lines) != h {
+		t.Fatalf("output %q: want %d lines", buf.String(), h)
+	}
+	open := "\x1b]8;;" + url + "\x07"
+	for i, line := range lines {
+		if !strings.HasPrefix(strings.TrimPrefix(line, "\x1b[H"), open) {
+			t.Errorf("line %d = %q, want it to open the link first", i, line)
+		}
+	}
+}

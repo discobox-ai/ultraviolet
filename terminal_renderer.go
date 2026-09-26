@@ -571,6 +571,7 @@ func (s *TerminalRenderer) updatePen(cell *Cell) {
 		}
 		if !s.cur.Link.IsZero() {
 			_, _ = s.buf.WriteString(ansi.ResetHyperlink())
+			s.cur.Link = Link{} // Reset link
 		}
 		return
 	}
