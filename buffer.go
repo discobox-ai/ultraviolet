@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"image"
 	"io"
+	"slices"
 	"strings"
 
 	"github.com/charmbracelet/x/ansi"
@@ -93,6 +94,19 @@ func (l Line) Set(x int, c *Cell) {
 		for j := 1; j < cw && x+j < lineWidth; j++ {
 			l[x+j] = Cell{}
 		}
+	}
+}
+
+// fill replaces a whole line with a single-column cell. Unlike Set, there is
+// no boundary at which an old wide cell must be repaired. Doubling the filled
+// prefix lets copy move cells in bulk without allocating a new row.
+func (l Line) fill(c Cell) {
+	if len(l) == 0 {
+		return
+	}
+	l[0] = c
+	for filled := 1; filled < len(l); {
+		filled += copy(l[filled:], l[:filled])
 	}
 }
 
@@ -468,18 +482,35 @@ func (b *Buffer) InsertLineArea(y, n int, c *Cell, area Rectangle) {
 		n = area.Max.Y - y
 	}
 
-	// Move existing lines down within the bounds
-	for i := area.Max.Y - 1; i >= y+n; i-- {
-		for x := area.Min.X; x < area.Max.X; x++ {
-			// We don't need to clone c here because we're just moving lines down.
-			b.Lines[i][x] = b.Lines[i-n][x]
+	// Out-of-range rows still use SetCell, which ignores missing cells.
+	wholeRows := area.Min.X == 0 && area.Max.X == b.Width() && y >= 0 && area.Max.Y <= b.Height()
+	if wholeRows {
+		// A full-width scroll moves rows, rather than copying every cell.
+		// Reuse the rows that leave the region for the newly blank lines.
+		lines := b.Lines[y:area.Max.Y]
+		slices.Reverse(lines)
+		slices.Reverse(lines[:n])
+		slices.Reverse(lines[n:])
+	} else {
+		for i := area.Max.Y - 1; i >= y+n; i-- {
+			for x := area.Min.X; x < area.Max.X; x++ {
+				b.Lines[i][x] = b.Lines[i-n][x]
+			}
 		}
 	}
-
-	// Clear the newly inserted lines within bounds
-	for i := y; i < y+n; i++ {
-		for x := area.Min.X; x < area.Max.X; x++ {
-			b.SetCell(x, i, c)
+	if wholeRows && (c == nil || c.Width == 1) {
+		blank := EmptyCell
+		if c != nil {
+			blank = *c
+		}
+		for i := y; i < y+n; i++ {
+			b.Lines[i].fill(blank)
+		}
+	} else {
+		for i := y; i < y+n; i++ {
+			for x := area.Min.X; x < area.Max.X; x++ {
+				b.SetCell(x, i, c)
+			}
 		}
 	}
 }
@@ -499,19 +530,34 @@ func (b *Buffer) DeleteLineArea(y, n int, c *Cell, area Rectangle) {
 		n = area.Max.Y - y
 	}
 
-	// Shift cells up within the bounds
-	for dst := y; dst < area.Max.Y-n; dst++ {
-		src := dst + n
-		for x := area.Min.X; x < area.Max.X; x++ {
-			// We don't need to clone c here because we're just moving cells up.
-			b.Lines[dst][x] = b.Lines[src][x]
+	// Out-of-range rows still use SetCell, which ignores missing cells.
+	wholeRows := area.Min.X == 0 && area.Max.X == b.Width() && y >= 0 && area.Max.Y <= b.Height()
+	if wholeRows {
+		// Keep the surviving rows in order and reuse those scrolled out.
+		lines := b.Lines[y:area.Max.Y]
+		slices.Reverse(lines[:n])
+		slices.Reverse(lines[n:])
+		slices.Reverse(lines)
+	} else {
+		for dst := y; dst < area.Max.Y-n; dst++ {
+			for x := area.Min.X; x < area.Max.X; x++ {
+				b.Lines[dst][x] = b.Lines[dst+n][x]
+			}
 		}
 	}
-
-	// Fill the bottom n lines with blank cells
-	for i := area.Max.Y - n; i < area.Max.Y; i++ {
-		for x := area.Min.X; x < area.Max.X; x++ {
-			b.SetCell(x, i, c)
+	if wholeRows && (c == nil || c.Width == 1) {
+		blank := EmptyCell
+		if c != nil {
+			blank = *c
+		}
+		for i := area.Max.Y - n; i < area.Max.Y; i++ {
+			b.Lines[i].fill(blank)
+		}
+	} else {
+		for i := area.Max.Y - n; i < area.Max.Y; i++ {
+			for x := area.Min.X; x < area.Max.X; x++ {
+				b.SetCell(x, i, c)
+			}
 		}
 	}
 }
