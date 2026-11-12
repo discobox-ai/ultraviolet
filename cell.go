@@ -177,6 +177,11 @@ type Style struct {
 
 // Equal returns true if the style is equal to the other style.
 func (s *Style) Equal(o *Style) bool {
+	// Default colors are common in blank cells and scrollback. Avoid three
+	// interface color comparisons when neither style supplies a color.
+	if s.Fg == nil && s.Bg == nil && s.UnderlineColor == nil {
+		return o.Fg == nil && o.Bg == nil && o.UnderlineColor == nil && s.Attrs == o.Attrs && s.Underline == o.Underline
+	}
 	return s.Attrs == o.Attrs &&
 		s.Underline == o.Underline &&
 		colorEqual(s.Fg, o.Fg) &&
